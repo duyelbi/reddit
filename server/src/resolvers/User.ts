@@ -6,12 +6,14 @@ import { RegisterInput } from "../types/Registerinput";
 import { validateRegisterInput } from "../utils/validateRegisterInput";
 import { LoginInput } from "../types/Logininput";
 import { Context } from "../types/Context";
+import { COOKIE_NAME } from "../constants";
 
 @Resolver()
 export class UserResolver {
   @Mutation((_return) => UserMutationResponse)
   async registerUser(
-    @Arg("registerInput") registerInput: RegisterInput
+    @Arg("registerInput") registerInput: RegisterInput,
+    @Ctx() { req }: Context
   ): Promise<UserMutationResponse> {
     const validateRegisterInputError = validateRegisterInput(registerInput);
     if (validateRegisterInputError !== null) {
@@ -46,13 +48,16 @@ export class UserResolver {
       } else {
         const hasPassword = await argon2.hash(password);
 
-        const newUser = User.create({ email, password: hasPassword, username });
+        let newUser = User.create({ email, password: hasPassword, username });
+
+        newUser = await User.save(newUser);
+        req.session.userId = newUser.id;
 
         return {
           code: 200,
           success: true,
           message: "User registration successful",
-          user: await User.save(newUser),
+          user: newUser,
         };
       }
     } catch (error) {
@@ -108,7 +113,7 @@ export class UserResolver {
       }
 
       // Create session and return cookie
-      req.session.userId = existingUser.id
+      req.session.userId = existingUser.id;
 
       return {
         code: 200,
@@ -124,5 +129,20 @@ export class UserResolver {
         message: `Internal server error ${error.message}`,
       };
     }
+  }
+
+  @Mutation((_return) => Boolean)
+  logout(@Ctx() { req, res }: Context): Promise<boolean> {
+    return new Promise((resolve, _reject) => {
+      res.clearCookie(COOKIE_NAME);
+
+      req.session.destroy((error) => {
+        if (error) {
+          console.log("DESTROYING SESSION ERROR");
+          resolve(false);
+        }
+        resolve(true);
+      });
+    });
   }
 }
